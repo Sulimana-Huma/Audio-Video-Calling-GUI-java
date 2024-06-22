@@ -1,0 +1,332 @@
+import com.github.sarxos.webcam.Webcam;
+import java.awt.BorderLayout;
+import java.awt.FlowLayout;
+import java.awt.event.ActionEvent;
+import java.awt.image.BufferedImage;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.net.Socket;
+import javax.sound.sampled.AudioFormat;
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.DataLine;
+import javax.sound.sampled.LineUnavailableException;
+import javax.sound.sampled.SourceDataLine;
+import javax.sound.sampled.TargetDataLine;
+import javax.swing.ImageIcon;
+import javax.swing.JButton;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
+import javax.swing.SwingConstants;
+
+public class Client {
+
+    public static final int AUDIO_SENDER_PORT = 5001;
+    public static final int AUDIO_RECEIVER_PORT = 5000;
+    public static final int VEDIO_SENDER_PORT = 7800;
+    public static final int VEDIO_RECEIVER_PORT = 7900;
+    public static final String SERVER_IP = "192.168.43.207";
+    
+    protected static JTextArea MsgArea;
+    
+    protected static JLabel server_video_frame;
+    protected static JLabel client_video_frame;
+
+    private static AudioSender t_audio_sender;
+    
+    private static AudioReceiver t_audio_reciver;
+    private static VideoHandler t_video_handler;
+    
+    /**
+     * @param args the command line arguments
+     * @throws java.io.IOException
+     * @throws java.lang.ClassNotFoundException
+     */
+public static void main(String args[]) throws Exception{
+   
+        createForm();
+        
+    }
+    
+    
+public static void createForm()
+{
+       
+        JFrame jf=new JFrame();
+        
+        // Set up the main window
+        jf.setTitle("CN Project of Voice and Video Chat - Client Side");
+        jf.setSize(600, 600);
+        jf.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        jf.setLayout(new BorderLayout());
+
+        JPanel videoChatPanel = createVideoChatPanel();
+
+        jf.add(videoChatPanel);
+        jf.setVisible(true);
+    
+ }
+
+    
+    private static JPanel createVideoChatPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+
+        
+        JPanel controlPanel = new JPanel(new FlowLayout());
+        server_video_frame = new JLabel();
+        server_video_frame.setSize(362, 275);
+        server_video_frame.setHorizontalAlignment(SwingConstants.CENTER);
+        server_video_frame.setForeground(new java.awt.Color(236,236,236));
+        server_video_frame.setText("Server Video Area");
+        
+        client_video_frame = new JLabel();
+        client_video_frame.setHorizontalAlignment(SwingConstants.CENTER);
+        client_video_frame.setSize(362, 275);
+        client_video_frame.setForeground(new java.awt.Color(236,236,236)); 
+        client_video_frame.setText("Client Video Area");
+        
+        controlPanel.add(server_video_frame);
+        controlPanel.add(client_video_frame);
+        panel.add(controlPanel, BorderLayout.NORTH);
+
+        
+        JPanel controlPanel2 = new JPanel(new FlowLayout());
+        JButton startVoiceCallButton = new JButton("Start Client for Voice Call");
+        JButton startVideoCallButton = new JButton("Start Client for Video Call");
+        
+        
+        controlPanel2.add(startVoiceCallButton);
+        controlPanel2.add(startVideoCallButton);
+        panel.add(controlPanel2, BorderLayout.CENTER);
+
+        MsgArea = new JTextArea();
+        MsgArea.setEditable(false);
+        MsgArea.setLineWrap(true);
+        MsgArea.setWrapStyleWord(true);
+        MsgArea.setRows(4);
+        JScrollPane videoChatScrollPane = new JScrollPane(MsgArea);
+        panel.add(videoChatScrollPane, BorderLayout.SOUTH);
+
+      
+        startVoiceCallButton.addActionListener((ActionEvent e) -> {
+            CNProjectChatClient.MsgArea.append("Starting voice call...\n");
+            controlPanel2.remove(startVoiceCallButton);
+            controlPanel2.remove(startVideoCallButton);
+            panel.repaint(1);
+            t_audio_sender=new AudioSender();
+            t_audio_reciver=new AudioReceiver();
+            
+            
+            t_audio_reciver.start();
+            CNProjectChatClient.MsgArea.append("Audio Reciever Thread started\n");
+            
+            t_audio_sender.start();
+            CNProjectChatClient.MsgArea.append("Audio Sender Thread started\n");
+        });
+
+
+        startVideoCallButton.addActionListener((ActionEvent e) -> {
+            CNProjectChatClient.MsgArea.append("Starting video call...\n");
+            controlPanel2.remove(startVideoCallButton);
+            controlPanel2.remove(startVoiceCallButton);
+            panel.repaint(1);
+            t_video_handler=new VideoHandler();
+            t_audio_reciver=new AudioReceiver();
+            t_audio_sender=new AudioSender();
+           
+            t_video_handler.start();
+            CNProjectChatClient.MsgArea.append("Video Handler Thread started\n");
+            t_audio_reciver.start();
+            CNProjectChatClient.MsgArea.append("Audio Reciever Thread started\n");
+            t_audio_sender.start();
+            CNProjectChatClient.MsgArea.append("Audio Sender Thread started\n");
+        
+        });
+
+        
+        return panel;
+    }
+
+}
+
+
+class AudioSender extends Thread{
+         
+        private boolean exit;
+    
+        private    Socket socket;
+        private DataOutputStream outputStream;
+        private AudioFormat format;
+        private DataLine.Info info;
+        private  TargetDataLine microphone;
+        @SuppressWarnings("empty-statement")
+    AudioSender() 
+    {
+        exit = false;
+        
+    }    
+        @Override
+        public void run() {
+            
+        try{
+        
+            socket = new Socket(CNProjectChatClient.SERVER_IP,CNProjectChatClient.AUDIO_SENDER_PORT);
+            CNProjectChatClient.MsgArea.append("Audio Sevnder Connected");
+            outputStream = new DataOutputStream(socket.getOutputStream());
+            format   = new AudioFormat(8000, 16, 2, true, true);
+            info  = new DataLine.Info(TargetDataLine.class, format);
+            microphone = (TargetDataLine) AudioSystem.getLine(info);
+            microphone.open(format);
+            microphone.start();
+            byte[] buffer = new byte[1024];
+            int bytesRead;
+            while (!exit&&((bytesRead = microphone.read(buffer, 0, buffer.length)) != -1)) {
+                    outputStream.write(buffer, 0, bytesRead);
+                }
+               
+            microphone.close();
+            socket.close();
+    
+
+                
+            } catch (IOException | LineUnavailableException e) {
+                CNProjectChatClient.MsgArea.append("Issue in connecting socket or running Thread of AudioSender\n");
+            }
+        }
+        public void end() {
+        
+         exit = true;
+
+                 
+        }
+   
+    }
+
+   class AudioReceiver  extends Thread{
+         
+        private boolean exit;
+        private Socket socket;
+        private DataInputStream inputStream;
+        private AudioFormat format;
+        private DataLine.Info info;
+        private  SourceDataLine speakers;
+        
+ 
+    AudioReceiver()
+    {
+        exit = false;
+        
+    }
+        
+        @Override
+        public void run()    
+        {   
+            
+        try{
+        
+            socket = new Socket(CNProjectChatClient.SERVER_IP,CNProjectChatClient.AUDIO_RECEIVER_PORT);
+            CNProjectChatClient.MsgArea.append("Audio Receiver Connected\n");
+            inputStream = new DataInputStream(socket.getInputStream());
+            format = new AudioFormat(8000, 16, 2, true, true);
+            info = new DataLine.Info(SourceDataLine.class, format);
+            
+            speakers = (SourceDataLine) AudioSystem.getLine(info);
+            speakers.open(format);
+            speakers.start();
+
+                byte[] buffer = new byte[1024];
+                int bytesRead;
+                while (!exit&&((bytesRead = inputStream.read(buffer)) != -1)) {
+                    speakers.write(buffer, 0, bytesRead);
+                }
+                speakers.stop();
+                socket.close();
+                
+               } catch (IOException |LineUnavailableException e) {
+                CNProjectChatClient.MsgArea.append("Issue in connecting socket or running Thread of AudioReciver\n");
+            } 
+   
+        }
+    
+            public void end() {
+                        exit = true;   
+        }
+   
+   
+    
+    }
+
+   class VideoHandler extends Thread{
+         
+        private boolean exit;
+        
+        private Socket s_in,s_out;
+        
+        private Webcam cam;
+        private ImageIcon ic;
+        private BufferedImage br;
+        
+ 
+    VideoHandler()
+    {
+        exit = false;
+         }
+        
+        @Override
+        public void run() {
+        
+        
+                   
+         try{
+                    s_out= new Socket(CNProjectChatClient.SERVER_IP,CNProjectChatClient.VEDIO_SENDER_PORT);
+                    CNProjectChatClient.MsgArea.append("Vedio Sender Connected\n");
+                    Thread.sleep(1000);
+                    s_in= new Socket(CNProjectChatClient.SERVER_IP,CNProjectChatClient.VEDIO_RECEIVER_PORT);
+                    CNProjectChatClient.MsgArea.append("Vedio Receiver Connected\n");
+                    CNProjectChatClient.MsgArea.append("Preaparing Video Streams\n");
+                    ObjectOutputStream out=new ObjectOutputStream(s_out.getOutputStream());
+                    CNProjectChatClient.MsgArea.append("Vedio OutputStream Connected\n");
+                   
+                     Thread.sleep(1000);
+                    ObjectInputStream in=new ObjectInputStream(s_in.getInputStream());
+                    CNProjectChatClient.MsgArea.append("Vedio InputStream Connected\n");
+                   
+                    cam =Webcam.getDefault();
+                    cam.open();
+                    CNProjectChatClient.MsgArea.append("CAM on");
+
+                     int i=0;
+        
+                     while(!exit && (i<100000)){
+                          br=cam.getImage();
+                          ic=new ImageIcon(br);
+            
+                          out.writeObject(ic);
+                          out.flush();
+                          CNProjectChatClient.client_video_frame.setIcon(ic);
+                          CNProjectChatClient.server_video_frame.setIcon((ImageIcon)in.readObject());
+                          i++;
+                                                  }
+                       s_out.close();
+                       cam.close();
+                       s_in.close();
+                
+     
+                     }catch(IOException | ClassNotFoundException | InterruptedException e){
+                     CNProjectChatClient.MsgArea.append("Issue in connecting socket or running Thread of VideoHandler\n");
+                     }
+            
+           
+            }
+        
+        public void end() {
+             exit=true;
+            
+        }
+    }
+
